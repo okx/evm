@@ -19,6 +19,16 @@ use alloy_evm::{block::BlockExecutionError, Evm};
 use alloy_primitives::{address, Address, Bytes};
 use revm::context_interface::result::{ExecutionResult, Output};
 
+
+
+/// X Layer devnet chain id as specified in the published `genesis.json`.
+const XLAYER_DEVNET_CHAIN_ID: u64 = 195;
+/// X Layer testnet chain id from the published `genesis-testnet.json`.
+const XLAYER_TESTNET_CHAIN_ID: u64 = 1952;
+/// X Layer mainnet chain id as specified in the published `genesis.json`.
+const XLAYER_MAINNET_CHAIN_ID: u64 = 196;
+
+
 /// XLayer mainnet (chain id 196) gasless whitelist predeploy address.
 ///
 /// TODO: confirm the final mainnet address — this is a placeholder.
@@ -26,10 +36,8 @@ pub const XLAYER_MAINNET_GASLESS_CONTRACT: Address =
     address!("0x4200000000000000000000000000000000000901");
 
 /// XLayer testnet (chain id 1952) gasless whitelist predeploy address.
-///
-/// TODO: confirm the final testnet address — this is a placeholder.
 pub const XLAYER_TESTNET_GASLESS_CONTRACT: Address =
-    address!("0x4200000000000000000000000000000000000901");
+    address!("0xA53fEda2b0d946436f34B591A25c256d8a9ae4E0");
 
 /// XLayer devnet (chain id 195) gasless whitelist predeploy address.
 pub const XLAYER_DEVNET_GASLESS_CONTRACT: Address =
@@ -48,10 +56,10 @@ pub const XLAYER_DEVNET_GASLESS_CONTRACT: Address =
 #[inline]
 pub const fn xlayer_gasless_contract(chain_id: u64) -> Option<Address> {
     match chain_id {
-        196 => Some(XLAYER_MAINNET_GASLESS_CONTRACT),
-        1952 => Some(XLAYER_TESTNET_GASLESS_CONTRACT),
-        195 => Some(XLAYER_DEVNET_GASLESS_CONTRACT),
-        _ => None,
+        XLAYER_MAINNET_CHAIN_ID => Some(XLAYER_MAINNET_GASLESS_CONTRACT),
+        XLAYER_TESTNET_CHAIN_ID => Some(XLAYER_TESTNET_GASLESS_CONTRACT),
+        // for devnets with different chain IDs, use the same contract address.
+        _ => Some(XLAYER_DEVNET_GASLESS_CONTRACT),
     }
 }
 
