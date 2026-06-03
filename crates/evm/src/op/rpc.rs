@@ -19,6 +19,7 @@ impl<Block: BlockEnvironment> TryIntoTxEnv<OpTransaction<TxEnv>, Block> for OpTr
             base: self.as_ref().clone().try_into_tx_env(evm_env)?,
             enveloped_tx: Some(Bytes::new()),
             deposit: Default::default(),
+            is_gasless: false,
         })
     }
 }
