@@ -1,6 +1,6 @@
 //! Block executor for Optimism.
 
-use crate::OpEvmFactory;
+use crate::{GaslessFeeHook, OpEvmFactory, XLayerGaslessFeeHook, XLayerGaslessFeeHookFactory};
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_consensus::{Eip658Value, Header, Transaction, TxReceipt};
 use alloy_eips::{Encodable2718, Typed2718};
@@ -32,17 +32,30 @@ use revm::{
 
 mod canyon;
 pub mod receipt_builder;
+pub mod xlayer_gasless_contract;
+pub mod xlayer_gasless_hook;
+pub use xlayer_gasless_contract::{
+    xlayer_gasless_contract, GaslessContract, XLAYER_DEVNET_GASLESS_CONTRACT,
+    XLAYER_MAINNET_GASLESS_CONTRACT, XLAYER_TESTNET_GASLESS_CONTRACT,
+};
 
 /// Trait for OP transaction environments. Allows to recover the transaction encoded bytes if
 /// they're available.
 pub trait OpTxEnv {
     /// Returns the encoded bytes of the transaction.
     fn encoded_bytes(&self) -> Option<&Bytes>;
+
+    /// Marks whether this transaction should execute without gas fees ("gasless").
+    fn set_gasless(&mut self, gasless: bool);
 }
 
 impl<T: revm::context::Transaction> OpTxEnv for OpTransaction<T> {
     fn encoded_bytes(&self) -> Option<&Bytes> {
         self.enveloped_tx.as_ref()
+    }
+
+    fn set_gasless(&mut self, gasless: bool) {
+        self.is_gasless = gasless;
     }
 }
 
@@ -59,7 +72,7 @@ pub struct OpBlockExecutionCtx {
 
 /// Block executor for Optimism.
 #[derive(Debug)]
-pub struct OpBlockExecutor<Evm, R: OpReceiptBuilder, Spec> {
+pub struct OpBlockExecutor<Evm, R: OpReceiptBuilder, Spec, Hook = XLayerGaslessFeeHook> {
     /// Spec.
     pub spec: Spec,
     /// Receipt builder.
@@ -81,9 +94,15 @@ pub struct OpBlockExecutor<Evm, R: OpReceiptBuilder, Spec> {
     pub is_regolith: bool,
     /// Utility to call system smart contracts.
     pub system_caller: SystemCaller<Spec>,
+    /// Optional gasless contract. When set, the executor checks the gasless contract
+    /// before each call tx and bypasses fee checks/charges for matching target/input pairs
+    /// (deposits are never affected).
+    pub gasless_contract: Option<GaslessContract>,
+    /// Gasless fee hook used for transaction execution.
+    pub gasless_fee_hook: core::marker::PhantomData<Hook>,
 }
 
-impl<E, R, Spec> OpBlockExecutor<E, R, Spec>
+impl<E, R, Spec, Hook> OpBlockExecutor<E, R, Spec, Hook>
 where
     E: Evm,
     R: OpReceiptBuilder,
@@ -102,7 +121,16 @@ where
             gas_used: 0,
             da_footprint_used: 0,
             ctx,
+            gasless_contract: None,
+            gasless_fee_hook: core::marker::PhantomData,
         }
+    }
+
+    /// Returns the executor with the given gasless contract enabled. Passing `None` (the
+    /// default) disables the hook entirely and is a no-op.
+    pub fn with_gasless_contract(mut self, gasless_contract: Option<GaslessContract>) -> Self {
+        self.gasless_contract = gasless_contract;
+        self
     }
 }
 
@@ -127,12 +155,13 @@ pub enum OpBlockExecutionError {
     },
 }
 
-impl<E, R, Spec> OpBlockExecutor<E, R, Spec>
+impl<E, R, Spec, Hook> OpBlockExecutor<E, R, Spec, Hook>
 where
     E: Evm<
         DB: Database + DatabaseCommit + StateDB,
         Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
     >,
+    Hook: GaslessFeeHook<E>,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
 {
@@ -159,12 +188,13 @@ where
     }
 }
 
-impl<E, R, Spec> BlockExecutor for OpBlockExecutor<E, R, Spec>
+impl<E, R, Spec, Hook> BlockExecutor for OpBlockExecutor<E, R, Spec, Hook>
 where
     E: Evm<
         DB: Database + DatabaseCommit + StateDB,
         Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
     >,
+    Hook: GaslessFeeHook<E>,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
 {
@@ -230,8 +260,28 @@ where
             }
         }
 
-        // Execute transaction and return the result
-        self.evm.transact(&tx).map_err(|err| {
+        let mut tx_env = tx.to_tx_env();
+
+        // Gasless fee hook: a gasless tx bypasses fee checks/charging and executes with gas price
+        // 0. Deposit txs already have special fee handling and are skipped. A tx is gasless only
+        // when it is zero-priced (`max_fee_per_gas == 0`, which covers a legacy `gas_price == 0`
+        // and a 1559 `max_fee == 0 && max_priority == 0`) AND the configured on-chain gasless
+        // contract approves it: `getGaslessAllowance(to, input)` returns `allowed == true` and a
+        // `gasLimit` not exceeded by the tx (see `GaslessContract::is_gasless`). This pairs with
+        // the gasless mempool, which accepts and mock-prices zero-priced txs.
+        let is_gasless = if !is_deposit && tx.tx().max_fee_per_gas() == 0 {
+            match self.gasless_contract {
+                Some(gasless_contract) => gasless_contract.is_gasless(&mut self.evm, tx.tx())?,
+                None => false,
+            }
+        } else {
+            false
+        };
+        tx_env.set_gasless(is_gasless);
+
+        // Execute transaction and return the result. For gasless txs the fee validation cfg
+        // switches are scoped to this single transaction and restored immediately afterwards.
+        Hook::transact_with_gasless_fee_checks(&mut self.evm, tx_env, is_gasless).map_err(|err| {
             let hash = tx.tx().trie_hash();
             BlockExecutionError::evm(err, hash)
         })
@@ -375,13 +425,15 @@ pub struct OpBlockExecutorFactory<
     spec: Spec,
     /// EVM factory.
     evm_factory: EvmFactory,
+    /// Optional gasless contract propagated to every executor created by this factory.
+    gasless_contract: Option<GaslessContract>,
 }
 
 impl<R, Spec, EvmFactory> OpBlockExecutorFactory<R, Spec, EvmFactory> {
     /// Creates a new [`OpBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
     /// [`OpReceiptBuilder`].
     pub const fn new(receipt_builder: R, spec: Spec, evm_factory: EvmFactory) -> Self {
-        Self { receipt_builder, spec, evm_factory }
+        Self { receipt_builder, spec, evm_factory, gasless_contract: None }
     }
 
     /// Exposes the receipt builder.
@@ -398,6 +450,17 @@ impl<R, Spec, EvmFactory> OpBlockExecutorFactory<R, Spec, EvmFactory> {
     pub const fn evm_factory(&self) -> &EvmFactory {
         &self.evm_factory
     }
+
+    /// Returns the configured gasless contract, if any.
+    pub const fn gasless_contract(&self) -> Option<GaslessContract> {
+        self.gasless_contract
+    }
+
+    /// Sets the gasless contract. Passing `None` (the default) disables the hook.
+    pub fn with_gasless_contract(mut self, gasless_contract: Option<GaslessContract>) -> Self {
+        self.gasless_contract = gasless_contract;
+        self
+    }
 }
 
 impl<R, Spec, EvmF> BlockExecutorFactory for OpBlockExecutorFactory<R, Spec, EvmF>
@@ -405,8 +468,8 @@ where
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
     EvmF: EvmFactory<
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
-    >,
+            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
+        > + XLayerGaslessFeeHookFactory,
     Self: 'static,
 {
     type EvmFactory = EvmF;
@@ -427,7 +490,13 @@ where
         DB: Database + 'a,
         I: Inspector<EvmF::Context<&'a mut State<DB>>> + 'a,
     {
-        OpBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder)
+        OpBlockExecutor::<_, _, _, EvmF::Hook<&'a mut State<DB>, I>>::new(
+            evm,
+            ctx,
+            &self.spec,
+            &self.receipt_builder,
+        )
+        .with_gasless_contract(self.gasless_contract)
     }
 }
 
@@ -439,7 +508,7 @@ mod tests {
     use alloy_evm::EvmEnv;
     use alloy_hardforks::ForkCondition;
     use alloy_op_hardforks::OpHardfork;
-    use alloy_primitives::{uint, Address, Signature, U256};
+    use alloy_primitives::{address, uint, Address, Bytes, Signature, TxKind, U256};
     use op_alloy::consensus::OpTxEnvelope;
     use op_revm::{
         constants::{
@@ -712,5 +781,87 @@ mod tests {
         assert_eq!(result.blob_gas_used, expected_da_footprint);
         assert_eq!(result.gas_used, gas_used_tx);
         assert!(result.blob_gas_used > result.gas_used);
+    }
+
+    mod xlayer_tests {
+        use super::*;
+        /// The `getGaslessAllowance` whitelist check runs an uncommitted system call before the user
+        /// tx executes. That system call consumes gas internally, but it must NOT be counted toward
+        /// the gasless tx's own `gasUsed` nor the block's cumulative `gas_used` — only the user tx's
+        /// execution gas may be. This locks that invariant: a whitelisted, zero-priced plain transfer
+        /// reports exactly the 21000 intrinsic gas at both the tx and block level.
+        #[test]
+        fn gasless_allowance_check_excluded_from_tx_and_block_gas() {
+            use revm::state::Bytecode;
+
+            const JOVIAN_TIMESTAMP: u64 = 1746806402;
+            const BLOCK_GAS_LIMIT: u64 = 1_000_000;
+            const TX_GAS_LIMIT: u64 = 21_000;
+            // Minimal contract returning ABI `(true, 0xffffff)` for any call: approves every gasless
+            // query with a gas allowance far above the tx's 21000 gas limit. Layout: `mem[0..32]=1`
+            // (allowed), `mem[32..64]=0xffffff` (gasLimit), `return mem[0..64]`.
+            const ALLOW_HIGH_GAS_BYTECODE: [u8; 17] = [
+                0x60, 0x01, 0x60, 0x00, 0x52, 0x62, 0xff, 0xff, 0xff, 0x60, 0x20, 0x52, 0x60, 0x40,
+                0x60, 0x00, 0xf3,
+            ];
+
+            // Funded sender (Address::ZERO) + L1 block info; DA footprint scalar 0 so Jovian adds none.
+            let mut db = prepare_jovian_db(0);
+
+            // Deploy the whitelist contract at the gasless predeploy address.
+            let code = Bytecode::new_raw(Bytes::from_static(&ALLOW_HIGH_GAS_BYTECODE));
+            db.insert_account(
+                XLAYER_DEVNET_GASLESS_CONTRACT,
+                AccountInfo { code_hash: code.hash_slow(), code: Some(code), ..Default::default() },
+            );
+
+            let op_chain_hardforks = OpChainHardforks::new(
+                OpHardfork::op_mainnet()
+                    .into_iter()
+                    .chain(vec![(OpHardfork::Jovian, ForkCondition::Timestamp(JOVIAN_TIMESTAMP))]),
+            );
+            let receipt_builder = OpAlloyReceiptBuilder::default();
+            let mut executor = build_executor(
+                &mut db,
+                &receipt_builder,
+                &op_chain_hardforks,
+                BLOCK_GAS_LIMIT,
+                JOVIAN_TIMESTAMP,
+            )
+            .with_gasless_contract(Some(GaslessContract::new(XLAYER_DEVNET_GASLESS_CONTRACT)));
+
+            // Zero-priced (`gas_price == 0` => `max_fee_per_gas == 0`) legacy transfer to a fresh EOA.
+            // Zero value keeps the cost at exactly the 21000 intrinsic gas (no new-account charge).
+            let recipient = address!("0x1111111111111111111111111111111111111111");
+            let tx_inner = TxLegacy {
+                gas_limit: TX_GAS_LIMIT,
+                gas_price: 0,
+                to: TxKind::Call(recipient),
+                value: U256::ZERO,
+                ..Default::default()
+            };
+            let tx = Recovered::new_unchecked(
+                OpTxEnvelope::Legacy(tx_inner.into_signed(Signature::new(
+                    Default::default(),
+                    Default::default(),
+                    Default::default(),
+                ))),
+                Address::ZERO,
+            );
+
+            let tx_gas_used =
+                executor.execute_transaction(&tx).expect("gasless whitelisted tx should execute");
+            let (_, result) = executor.finish().expect("failed to finish executor");
+
+            assert_eq!(
+                tx_gas_used, TX_GAS_LIMIT,
+                "tx gasUsed must be the intrinsic transfer cost, not inflated by the \
+             getGaslessAllowance system call"
+            );
+            assert_eq!(
+                result.gas_used, TX_GAS_LIMIT,
+                "block cumulative gas_used must exclude the getGaslessAllowance system call"
+            );
+        }
     }
 }
