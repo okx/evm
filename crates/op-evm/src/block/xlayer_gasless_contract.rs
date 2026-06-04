@@ -19,8 +19,6 @@ use alloy_evm::{block::BlockExecutionError, Evm};
 use alloy_primitives::{address, Address, Bytes};
 use revm::context_interface::result::{ExecutionResult, Output};
 
-
-
 /// X Layer devnet chain id as specified in the published `genesis.json`.
 const XLAYER_DEVNET_CHAIN_ID: u64 = 195;
 /// X Layer testnet chain id from the published `genesis-testnet.json`.
@@ -28,20 +26,17 @@ const XLAYER_TESTNET_CHAIN_ID: u64 = 1952;
 /// X Layer mainnet chain id as specified in the published `genesis.json`.
 const XLAYER_MAINNET_CHAIN_ID: u64 = 196;
 
-
+/// XLayer devnet (chain id 195) gasless whitelist predeploy address.
+pub const XLAYER_DEVNET_GASLESS_CONTRACT: Address =
+    address!("0x4200000000000000000000000000000000000700");
+/// XLayer testnet (chain id 1952) gasless whitelist predeploy address.
+pub const XLAYER_TESTNET_GASLESS_CONTRACT: Address =
+    address!("0x19787404b0c70021b4752028f7e3a92313885B27");
 /// XLayer mainnet (chain id 196) gasless whitelist predeploy address.
 ///
 /// TODO: confirm the final mainnet address — this is a placeholder.
 pub const XLAYER_MAINNET_GASLESS_CONTRACT: Address =
-    address!("0x4200000000000000000000000000000000000901");
-
-/// XLayer testnet (chain id 1952) gasless whitelist predeploy address.
-pub const XLAYER_TESTNET_GASLESS_CONTRACT: Address =
-    address!("0xA53fEda2b0d946436f34B591A25c256d8a9ae4E0");
-
-/// XLayer devnet (chain id 195) gasless whitelist predeploy address.
-pub const XLAYER_DEVNET_GASLESS_CONTRACT: Address =
-    address!("0x4200000000000000000000000000000000000700");
+    address!("0x19787404b0c70021b4752028f7e3a92313885B27");
 
 /// Returns the XLayer gasless whitelist predeploy address for the given chain id, or `None` for a
 /// non-XLayer chain (gasless disabled).

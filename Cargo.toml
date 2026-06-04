@@ -69,16 +69,16 @@ test-case = "3"
 
 # Gasless backport: use the forked op-revm (15.0.0 with gasless), pinned to a git commit.
 [patch.crates-io]
-op-revm = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm-bytecode = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm-context = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm-context-interface = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm-database = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm-database-interface = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm-handler = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm-inspector = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm-interpreter = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm-precompile = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm-primitives = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
-revm-state = { git = "https://github.com/okx/revm", rev = "ff159cb149e75a4a5dd3acbdc735e7c2b4a3c926" }
+op-revm = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm-bytecode = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm-context = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm-context-interface = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm-database = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm-database-interface = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm-handler = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm-inspector = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm-interpreter = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm-precompile = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm-primitives = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
+revm-state = { git = "https://github.com/okx/revm", rev = "544a2ad5de83ae0dd9e2ae6ceea095017f34ce13" }
