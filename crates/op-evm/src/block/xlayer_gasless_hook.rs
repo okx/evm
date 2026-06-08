@@ -48,15 +48,13 @@ pub trait GaslessFeeHook<E: Evm> {
     }
 }
 
-/// Factory witness for the gasless fee hook used by OP executors.
-pub trait XLayerGaslessFeeHookFactory: EvmFactory {
-    /// Gasless fee hook for an EVM created by this factory.
-    type Hook<DB: Database, I: Inspector<Self::Context<DB>>>: GaslessFeeHook<Self::Evm<DB, I>>;
-}
-
-impl XLayerGaslessFeeHookFactory for OpEvmFactory {
-    type Hook<DB: Database, I: Inspector<OpContext<DB>>> = XLayerGaslessFeeHook;
-}
+/// Marker trait satisfied by every [`EvmFactory`].
+///
+/// Previously this carried an associated `Hook` type threaded through [`OpBlockExecutorFactory`].
+/// The hook type is now hardcoded to [`XLayerGaslessFeeHook`] in `create_executor`; this blanket
+/// marker ensures code that references the bound still compiles.
+pub trait XLayerGaslessFeeHookFactory: EvmFactory {}
+impl<F: EvmFactory> XLayerGaslessFeeHookFactory for F {}
 
 /// Gasless fee hook for the standard [`OpEvm`].
 #[derive(Clone, Copy, Debug, Default)]
