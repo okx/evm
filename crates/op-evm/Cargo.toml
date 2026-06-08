@@ -30,6 +30,8 @@ thiserror.workspace = true
 
 auto_impl.workspace = true
 
+kona-genesis.workspace = true
+
 [dev-dependencies]
 alloy-hardforks.workspace = true
 test-case.workspace = true
