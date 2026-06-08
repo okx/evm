@@ -1,6 +1,6 @@
 //! Block executor for Optimism.
 
-use crate::{GaslessFeeHook, OpEvmFactory, XLayerGaslessFeeHook, XLayerGaslessFeeHookFactory};
+use crate::{GaslessFeeHook, OpEvmFactory, XLayerGaslessFeeHook};
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_consensus::{Eip658Value, Header, Transaction, TxReceipt};
 use alloy_eips::{Encodable2718, Typed2718};
@@ -38,6 +38,42 @@ pub use xlayer_gasless_contract::{
     xlayer_gasless_contract, GaslessContract, XLAYER_DEVNET_GASLESS_CONTRACT,
     XLAYER_MAINNET_GASLESS_CONTRACT, XLAYER_TESTNET_GASLESS_CONTRACT,
 };
+
+/// Provides access to the L2 chain ID embedded in a chain specification.
+///
+/// Implemented for [`kona_genesis::RollupConfig`] (the spec type used by kona's
+/// [`StatelessL2Builder`]) so that [`OpBlockExecutorFactory::create_executor`] can
+/// auto-derive the XLayer gasless contract address without any caller-side wiring.
+/// Also implemented for [`OpChainHardforks`] (returning `None`) so that the default
+/// test configuration is unaffected.
+pub trait HasChainId {
+    /// Returns the L2 chain ID, or `None` if the spec does not carry one.
+    fn chain_id(&self) -> Option<u64>;
+}
+
+impl HasChainId for kona_genesis::RollupConfig {
+    fn chain_id(&self) -> Option<u64> {
+        Some(self.l2_chain_id.id())
+    }
+}
+
+impl<T: HasChainId> HasChainId for alloc::sync::Arc<T> {
+    fn chain_id(&self) -> Option<u64> {
+        (**self).chain_id()
+    }
+}
+
+impl<T: HasChainId> HasChainId for &T {
+    fn chain_id(&self) -> Option<u64> {
+        (**self).chain_id()
+    }
+}
+
+impl HasChainId for OpChainHardforks {
+    fn chain_id(&self) -> Option<u64> {
+        None
+    }
+}
 
 /// Trait for OP transaction environments. Allows to recover the transaction encoded bytes if
 /// they're available.
@@ -466,10 +502,10 @@ impl<R, Spec, EvmFactory> OpBlockExecutorFactory<R, Spec, EvmFactory> {
 impl<R, Spec, EvmF> BlockExecutorFactory for OpBlockExecutorFactory<R, Spec, EvmF>
 where
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
-    Spec: OpHardforks,
+    Spec: OpHardforks + HasChainId,
     EvmF: EvmFactory<
             Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
-        > + XLayerGaslessFeeHookFactory,
+        >,
     Self: 'static,
 {
     type EvmFactory = EvmF;
@@ -489,14 +525,21 @@ where
     where
         DB: Database + 'a,
         I: Inspector<EvmF::Context<&'a mut State<DB>>> + 'a,
+        XLayerGaslessFeeHook: GaslessFeeHook<EvmF::Evm<&'a mut State<DB>, I>>,
     {
-        OpBlockExecutor::<_, _, _, EvmF::Hook<&'a mut State<DB>, I>>::new(
+        // Auto-derive the gasless contract from the chain ID when not explicitly set.
+        // xlayer_gasless_contract returns Some for the three known XLayer chain IDs (mainnet,
+        // testnet, devnet catch-all) and the caller can always override via with_gasless_contract.
+        let gasless = self.gasless_contract.or_else(|| {
+            self.spec.chain_id().and_then(xlayer_gasless_contract).map(GaslessContract::new)
+        });
+        OpBlockExecutor::<_, _, _, XLayerGaslessFeeHook>::new(
             evm,
             ctx,
             &self.spec,
             &self.receipt_builder,
         )
-        .with_gasless_contract(self.gasless_contract)
+        .with_gasless_contract(gasless)
     }
 }
 
