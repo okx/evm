@@ -215,6 +215,11 @@ where
         &self.cfg
     }
 
+    #[cfg(feature = "optional_no_base_fee")]
+    fn cfg_env_mut(&mut self) -> &mut CfgEnv<Self::Spec> {
+        &mut self.cfg
+    }
+
     fn chain_id(&self) -> u64 {
         self.cfg.chain_id
     }

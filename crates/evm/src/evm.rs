@@ -67,6 +67,16 @@ pub trait Evm {
     /// Reference to [`CfgEnv`].
     fn cfg_env(&self) -> &CfgEnv<Self::Spec>;
 
+    /// Mutable reference to [`CfgEnv`].
+    ///
+    /// Required by the gasless execution path ([`Evm::transact_gasless`]) to toggle the
+    /// per-execution [`CfgEnv::disable_base_fee`] flag. Only present when the
+    /// `optional_no_base_fee` feature is enabled, mirroring revm's
+    /// `#[cfg(feature = "optional_no_base_fee")]`-gated `disable_base_fee` field; enabling the
+    /// feature is what makes that field exist, so without it there is nothing mutable to expose.
+    #[cfg(feature = "optional_no_base_fee")]
+    fn cfg_env_mut(&mut self) -> &mut CfgEnv<Self::Spec>;
+
     /// Returns the chain ID of the environment.
     fn chain_id(&self) -> u64;
 
@@ -92,6 +102,31 @@ pub trait Evm {
         tx: impl IntoTxEnv<Self::Tx>,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
         self.transact_raw(tx.into_tx_env())
+    }
+
+    /// Executes a transaction with EIP-1559 base-fee validation disabled for this single
+    /// transaction (X Layer "gasless" execution, PRD §4.5 Mechanism B).
+    ///
+    /// Saves the current [`CfgEnv::disable_base_fee`], sets it to `true`, runs the transaction
+    /// through [`Evm::transact_raw`], then **restores the previous value on both the `Ok` and
+    /// `Err` paths**. The restore is consensus-critical: a leaked `disable_base_fee == true`
+    /// would make the *next* transaction skip its base-fee check.
+    ///
+    /// Only `disable_base_fee` is flipped — never `disable_fee_charge` — so the
+    /// `balance >= value` payability check and every non-fee validation (nonce, intrinsic gas,
+    /// block gas limit) still run exactly as on the default path. When `disable_base_fee` is
+    /// already `false` (the default), this is byte-for-byte identical to [`Evm::transact`].
+    #[cfg(feature = "optional_no_base_fee")]
+    fn transact_gasless(
+        &mut self,
+        tx: impl IntoTxEnv<Self::Tx>,
+    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        let saved = self.cfg_env().disable_base_fee;
+        self.cfg_env_mut().disable_base_fee = true;
+        // Capture the result, then restore BEFORE returning so the flag is reset on Ok and Err.
+        let result = self.transact_raw(tx.into_tx_env());
+        self.cfg_env_mut().disable_base_fee = saved;
+        result
     }
 
     /// Executes a system call.

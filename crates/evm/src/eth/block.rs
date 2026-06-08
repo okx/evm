@@ -164,32 +164,7 @@ where
 
         // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block's gasLimit.
-        //
-        // Pre-Amsterdam: use tx_gas_used (gas after refunds) as cumulative gas, matching
-        // the original behavior where gas_used = spent - refunded.
-        //
-        // Amsterdam+: use block_regular_gas_used.
-        let block_gas_used = if self.evm.cfg_env().enable_amsterdam_eip8037 {
-            self.block_regular_gas_used
-        } else {
-            self.cumulative_tx_gas_used
-        };
-        let block_available_gas = self.evm.block().gas_limit() - block_gas_used;
-
-        // Use regular part of transaction gas limit to check if it fits inside available block
-        // space.
-        let mut max_tx_gas_usage = tx.tx().gas_limit();
-        if let Some(tx_gas_limit_cap) = self.evm.cfg_env().tx_gas_limit_cap {
-            max_tx_gas_usage = min(max_tx_gas_usage, tx_gas_limit_cap);
-        }
-
-        if max_tx_gas_usage > block_available_gas {
-            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit: tx.tx().gas_limit(),
-                block_available_gas,
-            }
-            .into());
-        }
+        self.ensure_tx_fits_block_gas(tx.tx().gas_limit())?;
 
         // Execute transaction and return the result
         let result = self.evm.transact(tx_env).map_err(|err| {
@@ -320,6 +295,90 @@ where
 
     fn receipts(&self) -> &[Self::Receipt] {
         &self.receipts
+    }
+}
+
+impl<'a, E, Spec, R> EthBlockExecutor<'a, E, Spec, R>
+where
+    E: Evm<DB: StateDB, Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>>,
+    Spec: EthExecutorSpec,
+    R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
+    <R::Transaction as TransactionEnvelope>::TxType: Send + 'static,
+{
+    /// Gas still available in the block for a new transaction.
+    ///
+    /// Pre-Amsterdam: uses `cumulative_tx_gas_used` (gas after refunds), matching the original
+    /// behavior where `gas_used = spent - refunded`. Amsterdam+ (EIP-8037): uses
+    /// `block_regular_gas_used`.
+    #[inline]
+    fn block_available_gas(&self) -> u64 {
+        let block_gas_used = if self.evm.cfg_env().enable_amsterdam_eip8037 {
+            self.block_regular_gas_used
+        } else {
+            self.cumulative_tx_gas_used
+        };
+        self.evm.block().gas_limit() - block_gas_used
+    }
+
+    /// Validates that a transaction's `gas_limit` (capped by `cfg.tx_gas_limit_cap` when set)
+    /// fits within the gas still available in the block.
+    ///
+    /// This is a non-fee check: it runs identically on the default and gasless paths, since the
+    /// gasless toggle relaxes only EIP-1559 base-fee validation, never block-gas accounting.
+    #[inline]
+    fn ensure_tx_fits_block_gas(&self, tx_gas_limit: u64) -> Result<(), BlockExecutionError> {
+        let block_available_gas = self.block_available_gas();
+
+        // Use regular part of transaction gas limit to check if it fits inside available block
+        // space.
+        let mut max_tx_gas_usage = tx_gas_limit;
+        if let Some(tx_gas_limit_cap) = self.evm.cfg_env().tx_gas_limit_cap {
+            max_tx_gas_usage = min(max_tx_gas_usage, tx_gas_limit_cap);
+        }
+
+        if max_tx_gas_usage > block_available_gas {
+            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                transaction_gas_limit: tx_gas_limit,
+                block_available_gas,
+            }
+            .into());
+        }
+
+        Ok(())
+    }
+
+    /// Gasless variant of [`BlockExecutor::execute_transaction_without_commit`] (X Layer
+    /// gasless execution, PRD §4.5 Mechanism B).
+    ///
+    /// Runs the same block-gas-limit guard as the default path, then executes the transaction
+    /// through [`Evm::transact_gasless`], which disables EIP-1559 base-fee validation for this
+    /// single transaction and restores the flag afterwards (on both `Ok` and `Err`). The
+    /// non-fee checks (nonce, intrinsic gas, payability, block gas limit) are unaffected.
+    ///
+    /// The caller decides which transactions are gasless — that predicate (the per-tx whitelist
+    /// / `is_gasless` admission check) lives in the upstream pool/builder layers outside this
+    /// crate; this method is the execution-layer entry point those callers route gasless
+    /// transactions through.
+    #[cfg(feature = "optional_no_base_fee")]
+    pub fn execute_transaction_without_commit_gasless(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<<Self as BlockExecutor>::Result, BlockExecutionError> {
+        let (tx_env, tx) = tx.into_parts();
+
+        self.ensure_tx_fits_block_gas(tx.tx().gas_limit())?;
+
+        // Execute with base-fee validation disabled for just this transaction.
+        let result = self.evm.transact_gasless(tx_env).map_err(|err| {
+            let hash = tx.tx().trie_hash();
+            BlockExecutionError::evm(err, hash)
+        })?;
+
+        Ok(EthTxResult {
+            result,
+            blob_gas_used: tx.tx().blob_gas_used().unwrap_or_default(),
+            tx_type: tx.tx().tx_type(),
+        })
     }
 }
 

@@ -50,8 +50,15 @@ std = [
 	"thiserror/std",
 	"alloy-rpc-types-eth?/std",
 	"alloy-rpc-types-engine?/std",
-	"tracing/std"
+	"tracing/std",
+	"optional_no_base_fee"
 ]
+# Enables revm's `CfgEnv::disable_base_fee` field so the X Layer gasless execution path
+# (PRD §4.5 Mechanism B) can toggle EIP-1559 base-fee validation off for a single transaction.
+# Forwarded to `revm/optional_no_base_fee`; included in `std` (hence enabled by default) so the
+# gasless `transact_gasless`/`cfg_env_mut` API compiles in the default build. Does NOT enable
+# `optional_fee_charge`/`disable_fee_charge` — payability (`balance >= value`) must still be checked.
+optional_no_base_fee = ["revm/optional_no_base_fee"]
 gmp = [
     "revm/gmp",
 ]
