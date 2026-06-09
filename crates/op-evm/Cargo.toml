@@ -2,7 +2,7 @@
 name = "alloy-op-evm"
 description = "OP EVM implementation"
 
-version.workspace = true
+version = "0.26.4"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -14,7 +14,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alloy-evm = { workspace = true, features = ["op"] }
+alloy-evm = { version = "0.27.3", features = ["op"] }
 
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
