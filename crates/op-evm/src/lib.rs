@@ -36,7 +36,8 @@ use revm::{
 
 pub mod block;
 pub use block::xlayer_gasless_hook::{
-    GaslessFeeHook, OpFeeCheckState, XLayerGaslessFeeHook, XLayerGaslessFeeHookFactory,
+    GaslessFeeHook, NoopGaslessFeeHook, OpFeeCheckState, XLayerGaslessFeeHook,
+    XLayerGaslessFeeHookFactory,
 };
 pub use block::{
     xlayer_gasless_contract, GaslessContract, OpBlockExecutionCtx, OpBlockExecutor,

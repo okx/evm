@@ -58,6 +58,19 @@ impl XLayerGaslessFeeHookFactory for OpEvmFactory {
     type Hook<DB: Database, I: Inspector<OpContext<DB>>> = XLayerGaslessFeeHook;
 }
 
+/// No-op gasless fee hook for EVM factories that do not support gasless transactions.
+/// All gasless fee checks remain enabled; `is_gasless` is always a no-op on such EVMs.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoopGaslessFeeHook;
+
+impl<E: Evm> GaslessFeeHook<E> for NoopGaslessFeeHook {
+    fn disable_gasless_fee_checks(_evm: &mut E, _disabled: bool) -> Option<OpFeeCheckState> {
+        None
+    }
+
+    fn restore_gasless_fee_checks(_evm: &mut E, _previous: Option<OpFeeCheckState>) {}
+}
+
 /// Gasless fee hook for the standard [`OpEvm`].
 #[derive(Clone, Copy, Debug, Default)]
 pub struct XLayerGaslessFeeHook;
