@@ -1,6 +1,6 @@
 //! Block executor for Optimism.
 
-use crate::{GaslessFeeHook, OpEvmFactory, XLayerGaslessFeeHook, XLayerGaslessFeeHookFactory};
+use crate::{GaslessFeeHook, NoopGaslessFeeHook, OpEvmFactory, XLayerGaslessFeeHook};
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_consensus::{Eip658Value, Header, Transaction, TxReceipt};
 use alloy_eips::{Encodable2718, Typed2718};
@@ -469,8 +469,8 @@ where
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
     EvmF: EvmFactory<
-            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
-        > + XLayerGaslessFeeHookFactory,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
+    >,
     Self: 'static,
 {
     type EvmFactory = EvmF;
@@ -491,7 +491,10 @@ where
         DB: Database + 'a,
         I: Inspector<EvmF::Context<&'a mut State<DB>>> + 'a,
     {
-        OpBlockExecutor::<_, _, _, EvmF::Hook<&'a mut State<DB>, I>>::new(
+        // The factory uses NoopGaslessFeeHook by default. Callers that need actual gasless
+        // fee-bypass (i.e. full-node xlayer-reth) should construct OpBlockExecutor directly
+        // with XLayerGaslessFeeHook instead of going through this factory.
+        OpBlockExecutor::<_, _, _, NoopGaslessFeeHook>::new(
             evm,
             ctx,
             &self.spec,
