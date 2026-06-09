@@ -2,7 +2,7 @@
 name = "alloy-evm"
 description = "EVM abstraction for Alloy"
 
-version.workspace = true
+version = "0.27.3"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
