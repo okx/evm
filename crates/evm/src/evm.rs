@@ -192,6 +192,19 @@ pub trait Evm {
 
     /// Provides mutable references to the database, inspector and precompiles.
     fn components_mut(&mut self) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles);
+
+    /// Attempts to disable or re-enable the EVM's base-fee validation check.
+    ///
+    /// Returns the previous value of the flag (`Some(prev)`) if the EVM supports this
+    /// operation, or `None` if it does not (e.g. EVM types that don't expose the cfg field).
+    /// Default implementation returns `None` (not supported).
+    ///
+    /// Used by [`XLayerGaslessFeeHook`] to allow gasless transactions (gas_price == 0) to
+    /// bypass the `GasPriceLessThanBasefee` validation check.
+    #[allow(unused_variables)]
+    fn set_base_fee_check_disabled(&mut self, disabled: bool) -> Option<bool> {
+        None
+    }
 }
 
 /// An extension trait for [`Evm`] providing additional functionality.

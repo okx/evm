@@ -86,7 +86,8 @@ impl FromTxWithEncoded<Signed<TxLegacy>> for OpTransaction<TxEnv> {
 impl FromTxWithEncoded<TxLegacy> for OpTransaction<TxEnv> {
     fn from_encoded_tx(tx: &TxLegacy, caller: Address, encoded: Bytes) -> Self {
         let base = TxEnv::from_recovered_tx(tx, caller);
-        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless: base.gas_price == 0 }
+        let is_gasless = base.gas_price == 0;
+        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless }
     }
 }
 
@@ -106,7 +107,8 @@ impl FromTxWithEncoded<Signed<TxEip2930>> for OpTransaction<TxEnv> {
 impl FromTxWithEncoded<TxEip2930> for OpTransaction<TxEnv> {
     fn from_encoded_tx(tx: &TxEip2930, caller: Address, encoded: Bytes) -> Self {
         let base = TxEnv::from_recovered_tx(tx, caller);
-        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless: base.gas_price == 0 }
+        let is_gasless = base.gas_price == 0;
+        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless }
     }
 }
 
@@ -126,7 +128,8 @@ impl FromTxWithEncoded<Signed<TxEip1559>> for OpTransaction<TxEnv> {
 impl FromTxWithEncoded<TxEip1559> for OpTransaction<TxEnv> {
     fn from_encoded_tx(tx: &TxEip1559, caller: Address, encoded: Bytes) -> Self {
         let base = TxEnv::from_recovered_tx(tx, caller);
-        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless: base.gas_price == 0 }
+        let is_gasless = base.gas_price == 0;
+        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless }
     }
 }
 
@@ -146,7 +149,8 @@ impl FromTxWithEncoded<Signed<TxEip4844>> for OpTransaction<TxEnv> {
 impl FromTxWithEncoded<TxEip4844> for OpTransaction<TxEnv> {
     fn from_encoded_tx(tx: &TxEip4844, caller: Address, encoded: Bytes) -> Self {
         let base = TxEnv::from_recovered_tx(tx, caller);
-        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless: base.gas_price == 0 }
+        let is_gasless = base.gas_price == 0;
+        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless }
     }
 }
 
@@ -171,7 +175,8 @@ impl<T> FromTxWithEncoded<Signed<TxEip4844Variant<T>>> for OpTransaction<TxEnv> 
 impl<T> FromTxWithEncoded<TxEip4844Variant<T>> for OpTransaction<TxEnv> {
     fn from_encoded_tx(tx: &TxEip4844Variant<T>, caller: Address, encoded: Bytes) -> Self {
         let base = TxEnv::from_recovered_tx(tx, caller);
-        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless: base.gas_price == 0 }
+        let is_gasless = base.gas_price == 0;
+        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless }
     }
 }
 
@@ -191,7 +196,8 @@ impl FromTxWithEncoded<Signed<TxEip7702>> for OpTransaction<TxEnv> {
 impl FromTxWithEncoded<TxEip7702> for OpTransaction<TxEnv> {
     fn from_encoded_tx(tx: &TxEip7702, caller: Address, encoded: Bytes) -> Self {
         let base = TxEnv::from_recovered_tx(tx, caller);
-        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless: base.gas_price == 0 }
+        let is_gasless = base.gas_price == 0;
+        Self { base, enveloped_tx: Some(encoded), deposit: Default::default(), is_gasless }
     }
 }
 

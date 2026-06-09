@@ -31,7 +31,12 @@ use revm::{
 };
 
 pub mod block;
-pub use block::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory};
+pub use block::{
+    xlayer_gasless_contract, GaslessContract, GaslessFeeHook, HasChainId, OpBlockExecutionCtx,
+    OpBlockExecutor, OpBlockExecutorFactory, OpFeeCheckState, OpTxEnv, XLayerGaslessFeeHook,
+    XLAYER_DEVNET_GASLESS_CONTRACT, XLAYER_MAINNET_GASLESS_CONTRACT,
+    XLAYER_TESTNET_GASLESS_CONTRACT,
+};
 
 /// OP EVM implementation.
 ///
@@ -152,6 +157,15 @@ where
             &mut self.inner.0.inspector,
             &mut self.inner.0.precompiles,
         )
+    }
+
+    #[cfg(feature = "optional_no_base_fee")]
+    fn set_base_fee_check_disabled(&mut self, disabled: bool) -> Option<bool> {
+        let prev = self.inner.0.ctx.cfg.disable_base_fee;
+        self.inner.0.ctx.modify_cfg(|cfg| {
+            cfg.disable_base_fee = disabled;
+        });
+        Some(prev)
     }
 }
 

@@ -2,7 +2,7 @@
 name = "alloy-op-evm"
 description = "OP EVM implementation"
 
-version.workspace = true
+version = "0.26.4"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -48,3 +48,4 @@ std = [
 ]
 gmp = ["alloy-evm/gmp"]
 asm-keccak = ["alloy-evm/asm-keccak", "alloy-primitives/asm-keccak", "revm/asm-keccak"]
+optional_no_base_fee = ["revm/optional_no_base_fee", "op-revm/optional_no_base_fee"]

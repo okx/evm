@@ -32,17 +32,55 @@ use revm::{
 
 mod canyon;
 pub mod receipt_builder;
+pub mod xlayer_gasless_contract;
+pub mod xlayer_gasless_hook;
+pub use xlayer_gasless_contract::{
+    xlayer_gasless_contract, GaslessContract, XLAYER_DEVNET_GASLESS_CONTRACT,
+    XLAYER_MAINNET_GASLESS_CONTRACT, XLAYER_TESTNET_GASLESS_CONTRACT,
+};
+pub use xlayer_gasless_hook::{GaslessFeeHook, OpFeeCheckState, XLayerGaslessFeeHook};
+
+/// Provides access to the L2 chain ID embedded in a chain specification.
+pub trait HasChainId {
+    /// Returns the L2 chain ID, or `None` if the spec does not carry one.
+    fn chain_id(&self) -> Option<u64>;
+}
+
+impl<T: HasChainId> HasChainId for alloc::sync::Arc<T> {
+    fn chain_id(&self) -> Option<u64> {
+        (**self).chain_id()
+    }
+}
+
+impl<T: HasChainId> HasChainId for &T {
+    fn chain_id(&self) -> Option<u64> {
+        (**self).chain_id()
+    }
+}
+
+impl HasChainId for OpChainHardforks {
+    fn chain_id(&self) -> Option<u64> {
+        None
+    }
+}
 
 /// Trait for OP transaction environments. Allows to recover the transaction encoded bytes if
 /// they're available.
 pub trait OpTxEnv {
     /// Returns the encoded bytes of the transaction.
     fn encoded_bytes(&self) -> Option<&Bytes>;
+
+    /// Marks whether this transaction should execute without gas fees ("gasless").
+    fn set_gasless(&mut self, gasless: bool);
 }
 
 impl<T: revm::context::Transaction> OpTxEnv for OpTransaction<T> {
     fn encoded_bytes(&self) -> Option<&Bytes> {
         self.enveloped_tx.as_ref()
+    }
+
+    fn set_gasless(&mut self, gasless: bool) {
+        self.is_gasless = gasless;
     }
 }
 
@@ -78,7 +116,7 @@ impl<H, T> TxResult for OpTxResult<H, T> {
 
 /// Block executor for Optimism.
 #[derive(Debug)]
-pub struct OpBlockExecutor<Evm, R: OpReceiptBuilder, Spec> {
+pub struct OpBlockExecutor<Evm, R: OpReceiptBuilder, Spec, Hook = XLayerGaslessFeeHook> {
     /// Spec.
     pub spec: Spec,
     /// Receipt builder.
@@ -100,9 +138,14 @@ pub struct OpBlockExecutor<Evm, R: OpReceiptBuilder, Spec> {
     pub is_regolith: bool,
     /// Utility to call system smart contracts.
     pub system_caller: SystemCaller<Spec>,
+    /// Optional gasless contract. When set, the executor checks the gasless contract
+    /// before each call tx and bypasses fee checks/charges for matching target/input pairs.
+    pub gasless_contract: Option<GaslessContract>,
+    /// Gasless fee hook used for transaction execution.
+    pub gasless_fee_hook: core::marker::PhantomData<Hook>,
 }
 
-impl<E, R, Spec> OpBlockExecutor<E, R, Spec>
+impl<E, R, Spec, Hook> OpBlockExecutor<E, R, Spec, Hook>
 where
     E: Evm,
     R: OpReceiptBuilder,
@@ -121,7 +164,15 @@ where
             gas_used: 0,
             da_footprint_used: 0,
             ctx,
+            gasless_contract: None,
+            gasless_fee_hook: core::marker::PhantomData,
         }
+    }
+
+    /// Returns the executor with the given gasless contract enabled.
+    pub fn with_gasless_contract(mut self, gasless_contract: Option<GaslessContract>) -> Self {
+        self.gasless_contract = gasless_contract;
+        self
     }
 }
 
@@ -146,7 +197,7 @@ pub enum OpBlockExecutionError {
     },
 }
 
-impl<E, R, Spec> OpBlockExecutor<E, R, Spec>
+impl<E, R, Spec, Hook> OpBlockExecutor<E, R, Spec, Hook>
 where
     E: Evm<
         DB: Database + DatabaseCommit + StateDB,
@@ -179,12 +230,13 @@ where
     }
 }
 
-impl<E, R, Spec> BlockExecutor for OpBlockExecutor<E, R, Spec>
+impl<E, R, Spec, Hook> BlockExecutor for OpBlockExecutor<E, R, Spec, Hook>
 where
     E: Evm<
         DB: Database + DatabaseCommit + StateDB,
         Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
     >,
+    Hook: GaslessFeeHook<E>,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
 {
@@ -221,7 +273,7 @@ where
         &mut self,
         tx: impl ExecutableTx<Self>,
     ) -> Result<Self::Result, BlockExecutionError> {
-        let (tx_env, tx) = tx.into_parts();
+        let (mut tx_env, tx) = tx.into_parts();
         let is_deposit = tx.tx().ty() == DEPOSIT_TRANSACTION_TYPE;
 
         // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
@@ -258,11 +310,24 @@ where
             0
         };
 
+        // Gasless fee hook: non-deposit txs with max_fee_per_gas == 0 that are approved by the
+        // on-chain gasless contract execute without fee validation/charging.
+        let is_gasless = if !is_deposit && tx.tx().max_fee_per_gas() == 0 {
+            match self.gasless_contract {
+                Some(gasless_contract) => gasless_contract.is_gasless(&mut self.evm, tx.tx())?,
+                None => false,
+            }
+        } else {
+            false
+        };
+        tx_env.set_gasless(is_gasless);
+
         // Execute transaction and return the result
-        let result = self.evm.transact(tx_env).map_err(|err| {
-            let hash = tx.tx().trie_hash();
-            BlockExecutionError::evm(err, hash)
-        })?;
+        let result = Hook::transact_with_gasless_fee_checks(&mut self.evm, tx_env, is_gasless)
+            .map_err(|err| {
+                let hash = tx.tx().trie_hash();
+                BlockExecutionError::evm(err, hash)
+            })?;
 
         Ok(OpTxResult {
             inner: EthTxResult {
@@ -411,13 +476,21 @@ pub struct OpBlockExecutorFactory<
     spec: Spec,
     /// EVM factory.
     evm_factory: EvmFactory,
+    /// Optional gasless contract for XLayer gasless tx support.
+    pub gasless_contract: Option<GaslessContract>,
 }
 
 impl<R, Spec, EvmFactory> OpBlockExecutorFactory<R, Spec, EvmFactory> {
     /// Creates a new [`OpBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
     /// [`OpReceiptBuilder`].
     pub const fn new(receipt_builder: R, spec: Spec, evm_factory: EvmFactory) -> Self {
-        Self { receipt_builder, spec, evm_factory }
+        Self { receipt_builder, spec, evm_factory, gasless_contract: None }
+    }
+
+    /// Configures the optional gasless contract for XLayer gasless transaction support.
+    pub const fn with_gasless_contract(mut self, gasless_contract: Option<GaslessContract>) -> Self {
+        self.gasless_contract = gasless_contract;
+        self
     }
 
     /// Exposes the receipt builder.
@@ -462,8 +535,10 @@ where
     where
         DB: Database + 'a,
         I: Inspector<EvmF::Context<&'a mut State<DB>>> + 'a,
+        XLayerGaslessFeeHook: GaslessFeeHook<EvmF::Evm<&'a mut State<DB>, I>>,
     {
-        OpBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder)
+        OpBlockExecutor::<_, _, _, XLayerGaslessFeeHook>::new(evm, ctx, &self.spec, &self.receipt_builder)
+            .with_gasless_contract(self.gasless_contract)
     }
 }
 

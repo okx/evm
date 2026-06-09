@@ -56,8 +56,8 @@ op-alloy = { version = "0.23", default-features = false, features = [
 ] }
 
 # revm
-revm = { version = "34.0.0", default-features = false }
-op-revm = { version = "15.0.0", default-features = false }
+revm = { version = "34.0.0", default-features = false, features = ["optional_no_base_fee"] }
+op-revm = { version = "15.0.0", default-features = false, features = ["optional_no_base_fee"] }
 
 # misc
 auto_impl = "1"
