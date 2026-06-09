@@ -20,7 +20,7 @@ use core::{
 };
 use op_revm::{
     precompiles::OpPrecompiles, DefaultOp, OpBuilder, OpContext, OpHaltReason, OpSpecId,
-    OpTransaction, OpTransactionError,
+    OpTransaction,
 };
 use revm::{
     context::{BlockEnv, TxEnv},
@@ -106,7 +106,7 @@ where
 {
     type DB = DB;
     type Tx = OpTransaction<TxEnv>;
-    type Error = EVMError<DB::Error, OpTransactionError>;
+    type Error = EVMError<DB::Error, OpTxError>;
     type HaltReason = OpHaltReason;
     type Spec = OpSpecId;
     type BlockEnv = BlockEnv;
@@ -126,9 +126,9 @@ where
         tx: Self::Tx,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
         if self.inspect {
-            self.inner.inspect_tx(tx)
+            self.inner.inspect_tx(tx).map_err(map_op_err)
         } else {
-            self.inner.transact(tx)
+            self.inner.transact(tx).map_err(map_op_err)
         }
     }
 
@@ -138,7 +138,7 @@ where
         contract: Address,
         data: Bytes,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        self.inner.system_call_with_caller(caller, contract, data)
+        self.inner.system_call_with_caller(caller, contract, data).map_err(map_op_err)
     }
 
     fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>) {
@@ -187,7 +187,7 @@ impl EvmFactory for OpEvmFactory {
     type Context<DB: Database> = OpContext<DB>;
     type Tx = OpTransaction<TxEnv>;
     type Error<DBError: core::error::Error + Send + Sync + 'static> =
-        EVMError<DBError, OpTransactionError>;
+        EVMError<DBError, OpTxError>;
     type HaltReason = OpHaltReason;
     type Spec = OpSpecId;
     type BlockEnv = BlockEnv;
