@@ -46,7 +46,8 @@ pub trait OpTxEnv {
     fn encoded_bytes(&self) -> Option<&Bytes>;
 
     /// Marks whether this transaction should execute without gas fees ("gasless").
-    fn set_gasless(&mut self, gasless: bool);
+    /// Default no-op for backward compatibility with types that don't support gasless (e.g. kona's FpvmOpTx).
+    fn set_gasless(&mut self, _gasless: bool) {}
 }
 
 impl<T: revm::context::Transaction> OpTxEnv for OpTransaction<T> {
