@@ -15,6 +15,7 @@ use alloy_evm::{precompiles::PrecompilesMap, Database, Evm, EvmEnv, EvmFactory};
 use alloy_primitives::{Address, Bytes};
 use core::{
     fmt::Debug,
+    marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 use op_revm::{
@@ -30,6 +31,9 @@ use revm::{
     Context, ExecuteEvm, InspectEvm, Inspector, SystemCallEvm,
 };
 
+mod error;
+pub use error::{OpTxError, map_op_err};
+
 pub mod block;
 pub use block::{
     xlayer_gasless_contract, GaslessContract, GaslessFeeHook, HasChainId, OpBlockExecutionCtx,
@@ -43,13 +47,17 @@ pub use block::{
 /// This is a wrapper type around the `revm` evm with optional [`Inspector`] (tracing)
 /// support. [`Inspector`] support is configurable at runtime because it's part of the underlying
 /// [`OpEvm`](op_revm::OpEvm) type.
+///
+/// The fourth type parameter `Tx` is a phantom parameter kept for backward API compatibility
+/// with `alloy-op-evm` v0.26.3, where `OpEvm` had the signature `OpEvm<DB, I, P, Tx>`.
 #[allow(missing_debug_implementations)] // missing revm::OpContext Debug impl
-pub struct OpEvm<DB: Database, I, P = OpPrecompiles> {
+pub struct OpEvm<DB: Database, I, P = OpPrecompiles, Tx = OpTransaction<TxEnv>> {
     inner: op_revm::OpEvm<OpContext<DB>, I, EthInstructions<EthInterpreter, OpContext<DB>>, P>,
     inspect: bool,
+    _tx: PhantomData<Tx>,
 }
 
-impl<DB: Database, I, P> OpEvm<DB, I, P> {
+impl<DB: Database, I, P, Tx> OpEvm<DB, I, P, Tx> {
     /// Provides a reference to the EVM context.
     pub const fn ctx(&self) -> &OpContext<DB> {
         &self.inner.0.ctx
@@ -61,20 +69,20 @@ impl<DB: Database, I, P> OpEvm<DB, I, P> {
     }
 }
 
-impl<DB: Database, I, P> OpEvm<DB, I, P> {
+impl<DB: Database, I, P, Tx> OpEvm<DB, I, P, Tx> {
     /// Creates a new OP EVM instance.
     ///
     /// The `inspect` argument determines whether the configured [`Inspector`] of the given
     /// [`OpEvm`](op_revm::OpEvm) should be invoked on [`Evm::transact`].
-    pub const fn new(
+    pub fn new(
         evm: op_revm::OpEvm<OpContext<DB>, I, EthInstructions<EthInterpreter, OpContext<DB>>, P>,
         inspect: bool,
     ) -> Self {
-        Self { inner: evm, inspect }
+        Self { inner: evm, inspect, _tx: PhantomData }
     }
 }
 
-impl<DB: Database, I, P> Deref for OpEvm<DB, I, P> {
+impl<DB: Database, I, P, Tx> Deref for OpEvm<DB, I, P, Tx> {
     type Target = OpContext<DB>;
 
     #[inline]
@@ -83,14 +91,14 @@ impl<DB: Database, I, P> Deref for OpEvm<DB, I, P> {
     }
 }
 
-impl<DB: Database, I, P> DerefMut for OpEvm<DB, I, P> {
+impl<DB: Database, I, P, Tx> DerefMut for OpEvm<DB, I, P, Tx> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.ctx_mut()
     }
 }
 
-impl<DB, I, P> Evm for OpEvm<DB, I, P>
+impl<DB, I, P, Tx> Evm for OpEvm<DB, I, P, Tx>
 where
     DB: Database,
     I: Inspector<OpContext<DB>>,
@@ -201,6 +209,7 @@ impl EvmFactory for OpEvmFactory {
                     OpPrecompiles::new_with_spec(spec_id).precompiles(),
                 )),
             inspect: false,
+            _tx: PhantomData,
         }
     }
 
@@ -221,6 +230,7 @@ impl EvmFactory for OpEvmFactory {
                     OpPrecompiles::new_with_spec(spec_id).precompiles(),
                 )),
             inspect: true,
+            _tx: PhantomData,
         }
     }
 }
