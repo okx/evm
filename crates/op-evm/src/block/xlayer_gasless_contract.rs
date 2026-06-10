@@ -26,9 +26,11 @@ const XLAYER_TESTNET_CHAIN_ID: u64 = 1952;
 /// X Layer mainnet chain id as specified in the published `genesis.json`.
 const XLAYER_MAINNET_CHAIN_ID: u64 = 196;
 
-/// XLayer devnet (chain id 195) gasless whitelist predeploy address.
+/// XLayer devnet (chain id 195) gasless whitelist address.
+///
+/// Deterministic CREATE2 address of the GaslessWhitelist proxy deployed via DeployXlayerGaslessWhitelist.s.sol.
 pub const XLAYER_DEVNET_GASLESS_CONTRACT: Address =
-    address!("0x4200000000000000000000000000000000000700");
+    address!("0x70CA900387FCD29C2A71d511F10E5c961dc9363F");
 /// XLayer testnet (chain id 1952) gasless whitelist predeploy address.
 pub const XLAYER_TESTNET_GASLESS_CONTRACT: Address =
     address!("0x19787404b0c70021b4752028f7e3a92313885B27");
