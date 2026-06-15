@@ -31,12 +31,13 @@ use revm::{
 };
 
 pub mod block;
-pub use block::xlayer_gasless_hook::{
-    GaslessFeeHook, OpFeeCheckState, XLayerGaslessFeeHook, XLayerGaslessFeeHookFactory,
-};
 pub use block::{
-    xlayer_gasless_contract, GaslessContract, OpBlockExecutionCtx, OpBlockExecutor,
-    OpBlockExecutorFactory, XLAYER_DEVNET_GASLESS_CONTRACT, XLAYER_MAINNET_GASLESS_CONTRACT,
+    xlayer_gasless_contract,
+    xlayer_gasless_hook::{
+        GaslessFeeHook, OpFeeCheckState, XLayerGaslessFeeHook, XLayerGaslessFeeHookFactory,
+    },
+    GaslessContract, OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory,
+    XLAYER_DEVNET_GASLESS_CONTRACT, XLAYER_MAINNET_GASLESS_CONTRACT,
     XLAYER_TESTNET_GASLESS_CONTRACT,
 };
 
