@@ -36,8 +36,6 @@ pub const XLAYER_DEVNET_GASLESS_CONTRACT: Address =
 pub const XLAYER_TESTNET_GASLESS_CONTRACT: Address =
     address!("0x19787404b0c70021b4752028f7e3a92313885B27");
 /// XLayer mainnet (chain id 196) gasless whitelist predeploy address.
-///
-/// TODO: confirm the final mainnet address — this is a placeholder.
 pub const XLAYER_MAINNET_GASLESS_CONTRACT: Address =
     address!("0x19787404b0c70021b4752028f7e3a92313885B27");
 
