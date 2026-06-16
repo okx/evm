@@ -28,20 +28,18 @@ const XLAYER_MAINNET_CHAIN_ID: u64 = 196;
 
 /// XLayer devnet (chain id 195) gasless whitelist address.
 ///
-/// Deterministic CREATE2 address of the GaslessWhitelist proxy deployed via DeployXlayerGaslessWhitelist.s.sol.
+/// Deterministic CREATE2 address of the GaslessWhitelist proxy deployed via
+/// DeployXlayerGaslessWhitelist.s.sol.
 pub const XLAYER_DEVNET_GASLESS_CONTRACT: Address =
     address!("0xA9092BC02e2000a3F8996D1991621E9A03Ef2dfE");
 /// XLayer testnet (chain id 1952) gasless whitelist predeploy address.
 pub const XLAYER_TESTNET_GASLESS_CONTRACT: Address =
     address!("0x19787404b0c70021b4752028f7e3a92313885B27");
 /// XLayer mainnet (chain id 196) gasless whitelist predeploy address.
-///
-/// TODO: confirm the final mainnet address — this is a placeholder.
 pub const XLAYER_MAINNET_GASLESS_CONTRACT: Address =
     address!("0x19787404b0c70021b4752028f7e3a92313885B27");
 
-/// Returns the XLayer gasless whitelist predeploy address for the given chain id, or `None` for a
-/// non-XLayer chain (gasless disabled).
+/// Returns the XLayer gasless whitelist predeploy address for the given chain id.
 ///
 /// The per-network mapping lives here rather than in xlayer-chainspec so the gasless contract can
 /// be derived from the chain spec at every config construction. This makes gasless detection
@@ -106,9 +104,11 @@ impl GaslessContract {
         let Some(target) = tx.kind().into_to() else {
             return Ok((false, 0));
         };
-        let result =
-            transact(evm, self.contract, encode_get_gasless_allowance(target, tx.input()))?;
-        Ok(decode_allowance(result))
+        // Degrade to "not gasless" if the system call itself errors at the EVM/DB level.
+        match transact(evm, self.contract, encode_get_gasless_allowance(target, tx.input())) {
+            Ok(result) => Ok(decode_allowance(result)),
+            Err(_) => Ok((false, 0)),
+        }
     }
 
     /// Returns whether `tx` qualifies as gasless: the contract must allow it **and** the tx's gas
@@ -174,6 +174,17 @@ fn transact<E: Evm>(
 #[cfg(test)]
 mod xlayer_test {
     use super::*;
+    use crate::OpEvmFactory;
+    use alloy_consensus::TxEip1559;
+    use alloy_evm::{EvmEnv, EvmFactory};
+    use alloy_primitives::{TxKind, B256, U256};
+    use op_revm::OpSpecId;
+    use revm::{
+        context::{BlockEnv, CfgEnv},
+        database::DBErrorMarker,
+        state::{AccountInfo, Bytecode},
+        Database,
+    };
 
     #[test]
     fn encodes_get_gasless_allowance_address_and_input() {
@@ -191,5 +202,61 @@ mod xlayer_test {
         assert_eq!(&encoded[100..104], input.as_ref());
         assert!(encoded[104..132].iter().all(|b| *b == 0));
         assert_eq!(encoded.len(), 132);
+    }
+
+    /// Error type for [`FailingDb`].
+    #[derive(Debug)]
+    struct FailingDbError;
+    impl core::fmt::Display for FailingDbError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("failing db")
+        }
+    }
+    impl core::error::Error for FailingDbError {}
+    impl DBErrorMarker for FailingDbError {}
+
+    /// A [`Database`] whose every read errors, used to drive the gasless system call into its
+    /// EVM/DB-level error path.
+    #[derive(Debug)]
+    struct FailingDb;
+    impl Database for FailingDb {
+        type Error = FailingDbError;
+        fn basic(&mut self, _: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            Err(FailingDbError)
+        }
+        fn code_by_hash(&mut self, _: B256) -> Result<Bytecode, Self::Error> {
+            Err(FailingDbError)
+        }
+        fn storage(&mut self, _: Address, _: U256) -> Result<U256, Self::Error> {
+            Err(FailingDbError)
+        }
+        fn block_hash(&mut self, _: u64) -> Result<B256, Self::Error> {
+            Err(FailingDbError)
+        }
+    }
+
+    /// When the gasless system call errors at the EVM/DB layer, `get_gasless_allowance` degrades to
+    /// `(false, 0)` instead of propagating a `BlockExecutionError` (which would abort the whole
+    /// block).
+    #[test]
+    fn gasless_allowance_degrades_to_not_gasless_on_system_call_error() {
+        let env = EvmEnv::new(
+            CfgEnv::new_with_spec(OpSpecId::REGOLITH),
+            BlockEnv { basefee: 0, gas_limit: 30_000_000, ..Default::default() },
+        );
+        let mut evm = OpEvmFactory::default().create_evm(FailingDb, env);
+
+        // A non-create tx so a system call is actually performed (a create returns `(false, 0)`
+        // early without calling the contract).
+        let tx = TxEip1559 {
+            to: TxKind::Call(Address::from([0x11; 20])),
+            input: Bytes::copy_from_slice(&[0xde, 0xad]),
+            ..Default::default()
+        };
+        let contract = GaslessContract::new(Address::from([0x22; 20]));
+
+        // The DB error is swallowed: `Ok((false, 0))`, not `Err`.
+        assert_eq!(contract.get_gasless_allowance(&mut evm, &tx).unwrap(), (false, 0));
+        assert!(!contract.is_gasless(&mut evm, &tx).unwrap());
     }
 }

@@ -785,11 +785,12 @@ mod tests {
 
     mod xlayer_tests {
         use super::*;
-        /// The `getGaslessAllowance` whitelist check runs an uncommitted system call before the user
-        /// tx executes. That system call consumes gas internally, but it must NOT be counted toward
-        /// the gasless tx's own `gasUsed` nor the block's cumulative `gas_used` — only the user tx's
-        /// execution gas may be. This locks that invariant: a whitelisted, zero-priced plain transfer
-        /// reports exactly the 21000 intrinsic gas at both the tx and block level.
+        /// The `getGaslessAllowance` whitelist check runs an uncommitted system call before the
+        /// user tx executes. That system call consumes gas internally, but it must NOT be
+        /// counted toward the gasless tx's own `gasUsed` nor the block's cumulative
+        /// `gas_used` — only the user tx's execution gas may be. This locks that invariant:
+        /// a whitelisted, zero-priced plain transfer reports exactly the 21000 intrinsic
+        /// gas at both the tx and block level.
         #[test]
         fn gasless_allowance_check_excluded_from_tx_and_block_gas() {
             use revm::state::Bytecode;
@@ -797,15 +798,17 @@ mod tests {
             const JOVIAN_TIMESTAMP: u64 = 1746806402;
             const BLOCK_GAS_LIMIT: u64 = 1_000_000;
             const TX_GAS_LIMIT: u64 = 21_000;
-            // Minimal contract returning ABI `(true, 0xffffff)` for any call: approves every gasless
-            // query with a gas allowance far above the tx's 21000 gas limit. Layout: `mem[0..32]=1`
-            // (allowed), `mem[32..64]=0xffffff` (gasLimit), `return mem[0..64]`.
+            // Minimal contract returning ABI `(true, 0xffffff)` for any call: approves every
+            // gasless query with a gas allowance far above the tx's 21000 gas limit.
+            // Layout: `mem[0..32]=1` (allowed), `mem[32..64]=0xffffff` (gasLimit),
+            // `return mem[0..64]`.
             const ALLOW_HIGH_GAS_BYTECODE: [u8; 17] = [
                 0x60, 0x01, 0x60, 0x00, 0x52, 0x62, 0xff, 0xff, 0xff, 0x60, 0x20, 0x52, 0x60, 0x40,
                 0x60, 0x00, 0xf3,
             ];
 
-            // Funded sender (Address::ZERO) + L1 block info; DA footprint scalar 0 so Jovian adds none.
+            // Funded sender (Address::ZERO) + L1 block info; DA footprint scalar 0 so Jovian adds
+            // none.
             let mut db = prepare_jovian_db(0);
 
             // Deploy the whitelist contract at the gasless predeploy address.
@@ -830,8 +833,9 @@ mod tests {
             )
             .with_gasless_contract(Some(GaslessContract::new(XLAYER_DEVNET_GASLESS_CONTRACT)));
 
-            // Zero-priced (`gas_price == 0` => `max_fee_per_gas == 0`) legacy transfer to a fresh EOA.
-            // Zero value keeps the cost at exactly the 21000 intrinsic gas (no new-account charge).
+            // Zero-priced (`gas_price == 0` => `max_fee_per_gas == 0`) legacy transfer to a fresh
+            // EOA. Zero value keeps the cost at exactly the 21000 intrinsic gas (no
+            // new-account charge).
             let recipient = address!("0x1111111111111111111111111111111111111111");
             let tx_inner = TxLegacy {
                 gas_limit: TX_GAS_LIMIT,
