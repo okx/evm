@@ -1,6 +1,6 @@
 //! Block executor for Optimism.
 
-use crate::{GaslessFeeHook, OpEvmFactory, XLayerGaslessFeeHook, XLayerGaslessFeeHookFactory};
+use crate::OpEvmFactory;
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_consensus::{Eip658Value, Header, Transaction, TxReceipt};
 use alloy_eips::{Encodable2718, Typed2718};
@@ -33,7 +33,6 @@ use revm::{
 mod canyon;
 pub mod receipt_builder;
 pub mod xlayer_gasless_contract;
-pub mod xlayer_gasless_hook;
 pub use xlayer_gasless_contract::{
     xlayer_gasless_contract, GaslessContract, XLAYER_DEVNET_GASLESS_CONTRACT,
     XLAYER_MAINNET_GASLESS_CONTRACT, XLAYER_TESTNET_GASLESS_CONTRACT,
@@ -72,7 +71,7 @@ pub struct OpBlockExecutionCtx {
 
 /// Block executor for Optimism.
 #[derive(Debug)]
-pub struct OpBlockExecutor<Evm, R: OpReceiptBuilder, Spec, Hook = XLayerGaslessFeeHook> {
+pub struct OpBlockExecutor<Evm, R: OpReceiptBuilder, Spec> {
     /// Spec.
     pub spec: Spec,
     /// Receipt builder.
@@ -98,11 +97,9 @@ pub struct OpBlockExecutor<Evm, R: OpReceiptBuilder, Spec, Hook = XLayerGaslessF
     /// before each call tx and bypasses fee checks/charges for matching target/input pairs
     /// (deposits are never affected).
     pub gasless_contract: Option<GaslessContract>,
-    /// Gasless fee hook used for transaction execution.
-    pub gasless_fee_hook: core::marker::PhantomData<Hook>,
 }
 
-impl<E, R, Spec, Hook> OpBlockExecutor<E, R, Spec, Hook>
+impl<E, R, Spec> OpBlockExecutor<E, R, Spec>
 where
     E: Evm,
     R: OpReceiptBuilder,
@@ -122,7 +119,6 @@ where
             da_footprint_used: 0,
             ctx,
             gasless_contract: None,
-            gasless_fee_hook: core::marker::PhantomData,
         }
     }
 
@@ -155,13 +151,12 @@ pub enum OpBlockExecutionError {
     },
 }
 
-impl<E, R, Spec, Hook> OpBlockExecutor<E, R, Spec, Hook>
+impl<E, R, Spec> OpBlockExecutor<E, R, Spec>
 where
     E: Evm<
         DB: Database + DatabaseCommit + StateDB,
         Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
     >,
-    Hook: GaslessFeeHook<E>,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
 {
@@ -188,13 +183,12 @@ where
     }
 }
 
-impl<E, R, Spec, Hook> BlockExecutor for OpBlockExecutor<E, R, Spec, Hook>
+impl<E, R, Spec> BlockExecutor for OpBlockExecutor<E, R, Spec>
 where
     E: Evm<
         DB: Database + DatabaseCommit + StateDB,
         Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
     >,
-    Hook: GaslessFeeHook<E>,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
 {
@@ -279,9 +273,12 @@ where
         };
         tx_env.set_gasless(is_gasless);
 
-        // Execute transaction and return the result. For gasless txs the fee validation cfg
-        // switches are scoped to this single transaction and restored immediately afterwards.
-        Hook::transact_with_gasless_fee_checks(&mut self.evm, tx_env, is_gasless).map_err(|err| {
+        // Execute transaction and return the result.
+        // Gasless txs are flagged on the tx env;
+        // `OpEvm::transact_raw` (which `transact` delegates to) zeroes the base fee for the
+        // duration of that single tx so the zero-priced gasless tx clears fee validation, then
+        // restores it immediately afterwards.
+        self.evm.transact(tx_env).map_err(|err| {
             let hash = tx.tx().trie_hash();
             BlockExecutionError::evm(err, hash)
         })
@@ -468,8 +465,8 @@ where
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
     EvmF: EvmFactory<
-            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
-        > + XLayerGaslessFeeHookFactory,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
+    >,
     Self: 'static,
 {
     type EvmFactory = EvmF;
@@ -490,13 +487,8 @@ where
         DB: Database + 'a,
         I: Inspector<EvmF::Context<&'a mut State<DB>>> + 'a,
     {
-        OpBlockExecutor::<_, _, _, EvmF::Hook<&'a mut State<DB>, I>>::new(
-            evm,
-            ctx,
-            &self.spec,
-            &self.receipt_builder,
-        )
-        .with_gasless_contract(self.gasless_contract)
+        OpBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder)
+            .with_gasless_contract(self.gasless_contract)
     }
 }
 

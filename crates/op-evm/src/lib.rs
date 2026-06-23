@@ -32,12 +32,8 @@ use revm::{
 
 pub mod block;
 pub use block::{
-    xlayer_gasless_contract,
-    xlayer_gasless_hook::{
-        GaslessFeeHook, OpFeeCheckState, XLayerGaslessFeeHook, XLayerGaslessFeeHookFactory,
-    },
-    GaslessContract, OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory,
-    XLAYER_DEVNET_GASLESS_CONTRACT, XLAYER_MAINNET_GASLESS_CONTRACT,
+    xlayer_gasless_contract, GaslessContract, OpBlockExecutionCtx, OpBlockExecutor,
+    OpBlockExecutorFactory, XLAYER_DEVNET_GASLESS_CONTRACT, XLAYER_MAINNET_GASLESS_CONTRACT,
     XLAYER_TESTNET_GASLESS_CONTRACT,
 };
 
@@ -120,11 +116,13 @@ where
         &mut self,
         tx: Self::Tx,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        if self.inspect {
-            self.inner.inspect_tx(tx)
-        } else {
-            self.inner.transact(tx)
+        let pre_basefee = self.ctx_mut().block.basefee;
+        if tx.is_gasless {
+            self.ctx_mut().block.basefee = 0;
         }
+        let result = if self.inspect { self.inner.inspect_tx(tx) } else { self.inner.transact(tx) };
+        self.ctx_mut().block.basefee = pre_basefee;
+        result
     }
 
     fn transact_system_call(
@@ -364,5 +362,53 @@ mod tests {
         });
 
         assert!(result.is_ok());
+    }
+
+    mod xlayer_tests {
+        use super::*;
+
+        #[test]
+        fn test_gasless_tx_bypasses_basefee_check() {
+            let env = EvmEnv::new(
+                CfgEnv::new_with_spec(OpSpecId::REGOLITH),
+                BlockEnv { basefee: 100, gas_limit: 30_000, ..Default::default() },
+            );
+            let tx = OpTransaction::builder()
+                .base(TxEnv::builder().gas_limit(21_000).gas_price(0))
+                .build_fill();
+
+            // A zero-priced non-gasless tx is rejected: gas price (0) is below the base fee (100).
+            let mut evm = OpEvmFactory::default().create_evm(EmptyDB::default(), env.clone());
+            assert!(evm.transact(tx.clone()).is_err());
+
+            // The same tx flagged gasless executes because `transact_raw` (which `transact`
+            // delegates to) zeroes the base fee for the duration of the tx, then restores it.
+            let mut evm = OpEvmFactory::default().create_evm(EmptyDB::default(), env);
+            assert!(evm.transact(OpTransaction { is_gasless: true, ..tx }).is_ok());
+            assert_eq!(evm.ctx().block.basefee, 100);
+        }
+
+        #[test]
+        fn test_gasless_tx_restores_basefee_when_tx_fails() {
+            let mut evm = OpEvmFactory::default().create_evm(
+                EmptyDB::default(),
+                EvmEnv::new(
+                    CfgEnv::new_with_spec(OpSpecId::REGOLITH),
+                    BlockEnv { basefee: 100, gas_limit: 20_000, ..Default::default() },
+                ),
+            );
+            // Gas limit (21000) exceeds the block gas limit (20000), so the tx is rejected even
+            // though it is gasless: zeroing the base fee only relaxes the fee check, not other
+            // validation. This gives us a failing gasless tx to exercise the error path.
+            let tx = OpTransaction::builder()
+                .base(TxEnv::builder().gas_limit(21_000).gas_price(0))
+                .gasless(true)
+                .build_fill();
+
+            // `transact_raw` (which `transact` delegates to) restores the base fee on the error
+            // path, not just on success.
+            assert!(evm.transact(tx).is_err());
+            assert_eq!(evm.ctx().block.basefee, 100);
+        }
     }
 }
